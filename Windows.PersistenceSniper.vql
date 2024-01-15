@@ -1,0 +1,43 @@
+name: Windows.PersistenceSniper
+description: PersistenceSniper is a Powershell module that can be used by Blue Teams, Incident Responders and System Administrators to hunt persistences implanted in Windows machines. It is also available on Powershell Gallery and it is digitally signed with a valid code signing certificate. The tool is under active development with new releases coming out regularly, so make sure to use the up-to-date version. https://github.com/last-byte/PersistenceSniper
+
+author: Chris Jones - CPIRT | FabFaeb | Antonio Blescia
+
+parameters:
+  - name: DiffCSVUrl
+    default: 
+
+tools:
+ - name: PSniper
+   url: https://github.com/last-byte/PersistenceSniper/releases/download/v1.15.0/PersistenceSniper.zip
+   
+type: Client
+
+precondition:
+    SELECT OS From info() where OS = 'windows'
+
+sources:
+ - name: Result
+   query: |
+   
+        LET TmpDir <= tempdir()
+        LET Toolzip <= SELECT FullPath FROM Artifact.Generic.Utils.FetchBinary(ToolName="PSniper", IsExecutable=FALSE)
+
+        LET _ <= SELECT * FROM execve(
+            argv=["powershell", "-Command", "Invoke-WebRequest -Uri", DiffCSVUrl, "-OutFile", TmpDir+"\\false_positives.csv"],
+            cwd="C:\\"
+        )
+
+        LET _ <= SELECT * FROM unzip(filename=Toolzip.FullPath, output_directory=TmpDir)
+        
+        LET PSniperLocation <= TmpDir + '\\PersistenceSniper\\PersistenceSniper.psm1'
+        LET FalsePositivesFile <= TmpDir+"\\false_positives.csv"
+        
+        LET CSVFile <= TmpDir + '\\psniper_results.csv'
+        
+        LET cmdline = 'powershell -executionpolicy bypass -command "& { import-module '+ "'" + PSniperLocation + "'" + '; Find-AllPersistence -IncludeHighFalsePositivesChecks -DiffCSV '+ "'" + FalsePositivesFile + "'" + '| ConvertTo-CSV -NoTypeInformation}" | Out-File -encoding ASCII "' + CSVFile + '"'
+        
+        LET _ <= SELECT * FROM execve(argv=["Powershell", cmdline], length=10000)
+        -- SELECT upload(file=CSVFile) AS Uploads FROM scope()
+        SELECT * FROM parse_csv(filename=CSVFile)
+        
